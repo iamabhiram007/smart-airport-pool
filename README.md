@@ -114,3 +114,26 @@ With indexing:
 O(log N) candidate search
 
 This keeps latency under 300ms even at 100 RPS.
+---
+
+## Concurrency Handling Strategy
+
+Problem:
+Multiple passengers may attempt to book the last seat in the same ride simultaneously.
+
+Solution:
+We use database-level transactional locking.
+
+Implementation:
+- During matching, candidate ride rows are locked using:
+  SELECT ... FOR UPDATE
+- Only one request can modify seat count at a time
+- Other concurrent requests wait for transaction completion
+- If capacity becomes full, request creates a new ride instead
+
+Why this works:
+The database becomes the single source of truth and guarantees atomic seat allocation.
+
+Result:
+No negative seat counts and no overbooking even under high concurrency.
+
