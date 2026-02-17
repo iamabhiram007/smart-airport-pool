@@ -136,4 +136,42 @@ The database becomes the single source of truth and guarantees atomic seat alloc
 
 Result:
 No negative seat counts and no overbooking even under high concurrency.
+---
+
+## High Level Architecture
+
+System is designed as a stateless scalable backend.
+
+Flow:
+
+Client → Load Balancer → FastAPI Servers → Database
+
+### Components
+
+Client
+Sends ride requests via REST API.
+
+Load Balancer
+Distributes requests across multiple backend instances to support high traffic.
+
+FastAPI Service (Stateless)
+- Validates requests
+- Runs matching algorithm
+- Calculates pricing
+- Performs transactional booking
+
+PostgreSQL (Source of Truth)
+- Stores ride groups
+- Guarantees consistency
+- Handles row-level locking for concurrency safety
+
+Future Scaling Layer (Optional)
+Redis geo-index can be added to cache active rides and reduce lookup time.
+
+### Scalability
+
+- Stateless servers allow horizontal scaling
+- Database transactions ensure consistency
+- Matching runs in O(N) but bounded by airport zone size
+- System can support 100 RPS with multiple backend instances
 
