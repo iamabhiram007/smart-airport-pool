@@ -99,8 +99,16 @@ CREATE DATABASE ride_pool;
 
 ### 2. Set environment variable
 
+Use your local PostgreSQL username:
+
 ```bash
-export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ride_pool"
+export DATABASE_URL="postgresql://<your_db_user>@localhost:5432/ride_pool"
+```
+
+Example:
+
+```bash
+export DATABASE_URL="postgresql://postgres@localhost:5432/ride_pool"
 ```
 
 ### 3. Install dependencies
