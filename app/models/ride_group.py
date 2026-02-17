@@ -1,14 +1,16 @@
-from sqlalchemy import Column, String, Integer, Float
+from sqlalchemy import Column, Integer, Float
+from sqlalchemy.dialects.postgresql import UUID
 from app.db.database import Base
 import uuid
+
 
 class RideGroup(Base):
     __tablename__ = "ride_groups"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    available_seats = Column(Integer, default=4)
-    available_luggage = Column(Integer, default=4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
-    # NEW: location of first passenger (ride anchor point)
-    pickup_lat = Column(Float, nullable=True)
-    pickup_lng = Column(Float, nullable=True)
+    available_seats = Column(Integer, nullable=False)
+    available_luggage = Column(Integer, nullable=False)
+
+    pickup_lat = Column(Float, nullable=False)
+    pickup_lng = Column(Float, nullable=False)
