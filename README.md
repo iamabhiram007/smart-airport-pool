@@ -6,23 +6,24 @@ A backend system that automatically groups airport passengers into shared rides 
 
 ## Features
 
-- Shared cab matching (similar to Uber Pool)
-- Seat and luggage constraint enforcement
-- Detour tolerance filtering
-- Dynamic pricing based on occupancy & demand
-- PostgreSQL persistent storage
-- Concurrency-safe booking (no overbooking)
-- REST APIs with Swagger documentation
+* Shared cab matching (similar to Uber Pool)
+* Seat and luggage constraint enforcement
+* Detour tolerance filtering
+* Dynamic pricing based on occupancy & demand
+* PostgreSQL persistent storage
+* Concurrency-safe booking (no overbooking)
+* REST APIs with Swagger documentation
 
 ---
 
 ## Tech Stack
 
-- Backend Framework: FastAPI (Python)
-- Database: PostgreSQL
-- ORM: SQLAlchemy
-- API Docs: Swagger / OpenAPI
-- Algorithm: Greedy bin-packing + geo-distance matching
+* **Python:** 3.10+
+* **Backend Framework:** FastAPI
+* **Database:** PostgreSQL
+* **ORM:** SQLAlchemy
+* **API Docs:** Swagger / OpenAPI
+* **Algorithm:** Greedy bin-packing + geo-distance matching
 
 ---
 
@@ -32,7 +33,7 @@ A backend system that automatically groups airport passengers into shared rides 
 2. System finds nearby ride group
 3. Passenger joins ride OR new ride created
 4. Price calculated dynamically
-5. Seat allocated atomically using DB locking
+5. Seat allocated atomically using DB transaction
 
 ---
 
@@ -46,132 +47,158 @@ Pooling always reduces price.
 
 ## Concurrency Safety
 
-Uses PostgreSQL row-level locking:
+Seat allocation happens inside a database transaction.
+The ride row is locked during update, ensuring only one request can modify capacity at a time.
 
-SELECT ... FOR UPDATE
+Result:
 
-Prevents multiple users booking last seat.
+* No negative seat counts
+* No double booking
+* Safe under concurrent requests
 
 ---
 
 ## APIs
 
-POST /ride/request
-GET /ride/groups
+### Request Ride
 
-Swagger:
+`POST /ride/request`
+
+### List Active Ride Groups
+
+`GET /ride/groups`
+
+Swagger UI:
 http://127.0.0.1:8000/docs
+
+---
+
+## Example Request
+
+```json
+POST /ride/request
+
+{
+  "passenger_id": "p1",
+  "pickup": { "lat": 28.556, "lng": 77.100 },
+  "drop": { "lat": 28.600, "lng": 77.200 },
+  "seats": 1,
+  "luggage": 1
+}
+```
 
 ---
 
 ## Run Locally
 
-Create DB:
-CREATE DATABASE ride_pool;
+### 1. Create database
 
-Run server:
+```sql
+CREATE DATABASE ride_pool;
+```
+
+### 2. Set environment variable
+
+```bash
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ride_pool"
+```
+
+### 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Initialize tables
+
+```bash
+python init_db.py
+```
+
+### 5. Run server
+
+```bash
 uvicorn main:app --reload
+```
+
+Open:
+http://127.0.0.1:8000/docs
+
 ---
 
-## Database Schema & Indexing Strategy
+## Database Schema
 
-### Table: ride_groups
+### ride_groups
 
-| Column | Type | Purpose |
-|------|------|------|
-id | UUID | unique ride identifier
-available_seats | INT | remaining seat capacity
-available_luggage | INT | remaining luggage capacity
-pickup_lat | FLOAT | pickup latitude
-pickup_lng | FLOAT | pickup longitude
+| Column            | Type  | Description                |
+| ----------------- | ----- | -------------------------- |
+| id                | UUID  | Unique ride identifier     |
+| available_seats   | INT   | Remaining seat capacity    |
+| available_luggage | INT   | Remaining luggage capacity |
+| pickup_lat        | FLOAT | Pickup latitude            |
+| pickup_lng        | FLOAT | Pickup longitude           |
 
-### Indexing Strategy
+---
 
-We optimize ride matching queries using:
+## Indexing Strategy
 
-1. Location index
+```sql
 CREATE INDEX idx_pickup_location ON ride_groups(pickup_lat, pickup_lng);
-
-Helps quickly find nearby rides for pooling.
-
-2. Capacity filter index
 CREATE INDEX idx_available_seats ON ride_groups(available_seats);
+CREATE INDEX idx_active_rides ON ride_groups(available_seats) WHERE available_seats > 0;
+```
 
-Avoids scanning full rides.
+Purpose:
 
-3. Partial active ride index (optional improvement)
-CREATE INDEX idx_active_rides ON ride_groups(available_seats)
-WHERE available_seats > 0;
+* Faster ride matching
+* Avoid full table scans
+* Maintain <300ms response time at high load
 
-Speeds up matching under high traffic.
-
-### Why Indexing Matters
-
-Without indexing:
-O(N) full table scan per request
-
-With indexing:
-O(log N) candidate search
-
-This keeps latency under 300ms even at 100 RPS.
 ---
 
 ## Concurrency Handling Strategy
 
-Problem:
-Multiple passengers may attempt to book the last seat in the same ride simultaneously.
+* Seat allocation inside DB transaction
+* Only one request updates a ride row at a time
+* If ride becomes full → new ride created
 
-Solution:
-We use database-level transactional locking.
+Guarantees atomic booking even under simultaneous requests.
 
-Implementation:
-- During matching, candidate ride rows are locked using:
-  SELECT ... FOR UPDATE
-- Only one request can modify seat count at a time
-- Other concurrent requests wait for transaction completion
-- If capacity becomes full, request creates a new ride instead
-
-Why this works:
-The database becomes the single source of truth and guarantees atomic seat allocation.
-
-Result:
-No negative seat counts and no overbooking even under high concurrency.
 ---
 
 ## High Level Architecture
 
-System is designed as a stateless scalable backend.
-
-Flow:
-
-Client → Load Balancer → FastAPI Servers → Database
+Client → Load Balancer → FastAPI Servers → PostgreSQL
 
 ### Components
 
-Client
+**Client**
 Sends ride requests via REST API.
 
-Load Balancer
-Distributes requests across multiple backend instances to support high traffic.
+**Load Balancer**
+Distributes traffic across backend instances.
 
-FastAPI Service (Stateless)
-- Validates requests
-- Runs matching algorithm
-- Calculates pricing
-- Performs transactional booking
+**FastAPI Service (Stateless)**
 
-PostgreSQL (Source of Truth)
-- Stores ride groups
-- Guarantees consistency
-- Handles row-level locking for concurrency safety
+* Validation
+* Matching algorithm
+* Pricing calculation
+* Transactional booking
 
-Future Scaling Layer (Optional)
-Redis geo-index can be added to cache active rides and reduce lookup time.
+**PostgreSQL (Source of Truth)**
 
-### Scalability
+* Stores ride groups
+* Ensures consistency
+* Handles row locking
 
-- Stateless servers allow horizontal scaling
-- Database transactions ensure consistency
-- Matching runs in O(N) but bounded by airport zone size
-- System can support 100 RPS with multiple backend instances
+**Future Improvement**
+Redis geo-index for faster nearby ride lookup.
 
+---
+
+## Scalability
+
+* Stateless backend allows horizontal scaling
+* Matching complexity bounded by airport zone
+* Supports ~100 RPS with multiple instances
+* Database ensures strong consistency
